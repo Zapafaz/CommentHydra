@@ -1,4 +1,6 @@
-﻿using System.IO;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace CommentHydra.Utilities
@@ -13,27 +15,33 @@ namespace CommentHydra.Utilities
         /// </summary>
         /// <param name="dir">The directory to get files from.</param>
         /// <param name="includeSubfolders">Whether or not to get files from subfolders as well.</param>
-        /// <param name="ignoredExtensions">The list of extensions to return, if any.</param>
+        /// <param name="extensions">The list of extensions to return, if any.</param>
         /// <returns>Returns the set of all files from the given folder, and subfolders, if includeSubfolders.</returns>
         internal static string[] GetFiles(string dir, bool includeSubfolders, string[] extensions)
         {
-            var files = Directory.GetFiles(dir).ToList();
-            if (includeSubfolders)
+            try
             {
-                foreach (string folder in GetAllFolders(dir, includeSubfolders))
-                {
-                    files.AddRange(Directory.GetFiles(folder));
-                }
-            }
+                var files = Directory.GetFiles(dir).ToList();
 
-            foreach (string path in files)
-            {
-                if (extensions?.Length > 0 && extensions.Any(s => s != Path.GetExtension(path)))
+                if (includeSubfolders)
                 {
-                    files.Remove(path);
+                    foreach (string folder in GetAllFolders(dir, includeSubfolders))
+                    {
+                        foreach (string extension in extensions)
+                        {
+                            files.AddRange(Directory.GetFiles(folder, "*" + extension));
+                        }
+                    }
                 }
+
+                return files.ToArray();
             }
-            return files.ToArray();
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                Program.CloseProgram();
+                throw;
+            }
         }
 
         /// <summary>
