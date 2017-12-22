@@ -1,7 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using CommentHydra.Utilities;
+using System.Text;
 
 namespace CommentHydra
 {
@@ -10,120 +11,82 @@ namespace CommentHydra
     /// </summary>
     internal class Commenter
     {
-        internal string[] NonComment { get; }
+        internal string[] NonCommentIndicators { get; }
+        internal string[] NewComments { get; }
         internal string Folder { get; }
-        internal string[] Extensions { get; }
-        internal bool Verbose { get; set; }
+        internal string Extension { get; }
 
         /// <summary>
         /// Constructor for the commenter class, used to add/update comments to the start of every file in a given folder.
         /// </summary>
         /// <param name="folder">The folder containing the files to add/update comments to.</param>
         /// <param name="nonComment">The type of non-comments to look for at the start of a file, i.e. when to stop looking for comments.</param>
-        /// <param name="extensions">Any file extensions that should have comments added to them.</param>
-        /// <remarks>May need to adjust this if single instance of Commenter needs to comment across multiple file types.
-        /// e.g. .cs files have different nonComment set than .cpp files, etc</remarks>
-        internal Commenter(string folder, string[] nonComment, string[] extensions)
+        /// <param name="extension">The file extension that should have comments added to them.</param>
+        internal Commenter(string folder, string[] nonComment, string extension, string[] newComments)
         {
             Folder = folder;
-            NonComment = nonComment;
-            Extensions = extensions;
-            Verbose = false;
-        }
-
-        /// <summary>
-        /// Constructor for the commenter class, used to add/update comments to every .cs file in a given folder.
-        /// </summary>
-        /// <param name="folder">The folder containing the files to add/update comments to.</param>
-        internal Commenter(string folder)
-        {
-            Folder = folder;
-            NonComment = new string[] { "using", "namespace", "class", "///" };
-            Extensions = new string[] { ".cs" };
-            Verbose = false;
+            NonCommentIndicators = nonComment;
+            Extension = extension;
+            NewComments = newComments;
         }
 
         /// <summary>
         /// Add comments to every file in a folder, and possibly all files in its subfolders.
         /// </summary>
-        /// <param name="commentLines">The comments to add.</param>
-        /// <param name="includeSubfolders">False = only add comments to files in the current folder.</param>
+        /// <param name="searchOption">Only add comments to files in the current folder, or to files in all subfolders as well?</param>
         /// <param name="replaceOldComments">False = files with existing header comments will be ignored.</param>
-        internal void AddHeaderComments(string[] commentLines, bool includeSubfolders, bool replaceOldComments)
+        internal void AddCommentsToAllFiles(SearchOption searchOption, bool replaceOldComments)
         {
-            var files = FileInput.GetFiles(Folder, includeSubfolders, Extensions).ToList();
+            var files = Directory.GetFiles(Folder, '*'+Extension, searchOption);
             foreach (string path in files)
             {
-                if (replaceOldComments)
+                List<string> lines = DetermineRewriteLines(path, replaceOldComments);
+                if (lines == null)
                 {
-                    ReplaceHeaderComments(path, commentLines);
+                    continue;
                 }
-                else if (!HasHeaderComments(path))
-                {
-                    var linesToKeep = File.ReadAllLines(path).ToList();
-                    linesToKeep.InsertRange(0, commentLines);
-                    try
-                    {
-                        File.Delete(path);
-                        if (Verbose)
-                        {
-                            Console.WriteLine("Adding comments to: " + path);
-                        }
-                        File.WriteAllLines(path, linesToKeep);
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine(e);
-                        Program.CloseProgram();
-                        throw;
-                    }
-                }
-                else if (Verbose)
-                {
-                    Console.WriteLine("File already has comments, ignoring: " + path);
-                }
+                File.Delete(path);
+                Debug.WriteLine("Adding comments to: " + path);
+                File.WriteAllLines(path, lines);
             }
         }
 
         /// <summary>
-        /// Remove any comments from the header (i.e. before using, namespace, etc) of a file, and replace them with a new set of comments.
+        /// Get the lines to write for the given file based on this.NewComments and replace old comments if <paramref name="replaceOldComments"/> == true
         /// </summary>
         /// <param name="path">The file to remove comments from.</param>
-        /// <param name="newComments">The new comments to add.</param>
-        private void ReplaceHeaderComments(string path, string[] newComments)
+        /// <param name="replaceOldComments">Whether or not to replace old comments in the file.</param>
+        /// <returns>Returns a list of lines to write.</returns>
+        private List<string> DetermineRewriteLines(string path, bool replaceOldComments)
         {
-            try
+            if (!replaceOldComments && HasHeaderComments(path))
             {
-                var linesToKeep = File.ReadAllLines(path).ToList();
-                foreach (string line in linesToKeep)
+                Debug.WriteLine("File already has comments, ignoring: " + path);
+                return null;
+            }
+
+            var linesToKeep = File.ReadAllLines(path).ToList();
+
+            if (replaceOldComments)
+            {
+                // This should make it remove everything until it runs into something in NonCommentIndicators
+                while (linesToKeep.Count > 0)
                 {
                     // Trim in case of unusual whitespace style
-                    // This should make it stop at any using / import / namespace / class / XML doc comment / etc.
-                    if (NonComment.Any(s => line.Trim().StartsWith(s)))
+                    if (NonCommentIndicators.Any(s => linesToKeep[0].Trim().StartsWith(s)))
                     {
                         break;
                     }
                     else
                     {
-                        linesToKeep.Remove(line);
+                        linesToKeep.RemoveAt(0);
                     }
                 }
-
-                linesToKeep.InsertRange(0, newComments);
-
-                File.Delete(path);
-                if (Verbose)
-                {
-                    Console.WriteLine("Replacing/adding comments in: " + path);
-                }
-                File.WriteAllLines(path, linesToKeep);
             }
-            catch (Exception e)
-            {
-                Console.WriteLine(e);
-                Program.CloseProgram();
-                throw;
-            }
+
+            linesToKeep.InsertRange(0, NewComments);
+
+            return linesToKeep;
         }
 
         /// <summary>
@@ -133,26 +96,17 @@ namespace CommentHydra
         /// <returns>Returns true if the file already has comments at the top, false if not.</returns>
         private bool HasHeaderComments(string path)
         {
-            try
+            var lines = File.ReadAllLines(path);
+            foreach (string line in lines)
             {
-                var lines = File.ReadAllLines(path);
-                foreach (string line in lines)
+                if (NonCommentIndicators.Any(s => line.Trim().StartsWith(s)))
                 {
-                    if (NonComment.Any(s => line.Trim().StartsWith(s)))
-                    {
-                        break;
-                    }
-                    else
-                    {
-                        return true;
-                    }
+                    break;
                 }
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine(e);
-                Program.CloseProgram();
-                throw;
+                else
+                {
+                    return true;
+                }
             }
             return false;
         }

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CommentHydra": {
+      "commandName": "Project",
+      "commandLineArgs": "-r -a -s \"H:\\Temporary\\hydraTest\\comments.cs\" -t \"H:\\Temporary\\hydraTest\""
+    }
+  }
+}
